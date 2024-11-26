@@ -15,28 +15,33 @@
  */
 
 #include <complex>
+#include <set>
 
 #include "command.h"
 #include "filter/base.h"
+#include "filter/demodulate.h"
 #include "filter/gradient.h"
 #include "filter/median.h"
 #include "filter/normalise.h"
 #include "filter/smooth.h"
 #include "filter/zclean.h"
 #include "image.h"
+#include "interp/cubic.h"
 #include "math/fft.h"
 
 using namespace MR;
 using namespace App;
 
-const std::vector<std::string> filters = {"fft", "gradient", "median", "smooth", "normalise", "zclean"};
+const std::vector<std::string> filters = {"demodulate", "fft", "gradient", "median", "smooth", "normalise", "zclean"};
 
 // clang-format off
-const OptionGroup FFTOption = OptionGroup ("Options for FFT filter")
+const OptionGroup FFTAxesOption = OptionGroup ("Options applicable to both demodulate and FFT filters")
   + Option ("axes", "the axes along which to apply the Fourier Transform."
                     " By default, the transform is applied along the three spatial axes."
                     " Provide as a comma-separate list of axis indices.")
-    + Argument ("list").type_sequence_int()
+    + Argument ("list").type_sequence_int();
+
+const OptionGroup FFTOption = OptionGroup ("Options for FFT filter")
   + Option ("inverse", "apply the inverse FFT")
   + Option ("magnitude", "output a magnitude image rather than a complex-valued image")
   + Option ("rescale", "rescale values so that inverse FFT recovers original values")
@@ -116,7 +121,7 @@ void usage() {
 
   DESCRIPTION
   + "The available filters are:"
-    " fft, gradient, median, smooth, normalise, zclean."
+    " demodulate, fft, gradient, median, smooth, normalise, zclean."
   + "Each filter has its own unique set of optional parameters."
   + "For 4D images, each 3D volume is processed independently.";
 
@@ -126,6 +131,7 @@ void usage() {
   + Argument ("output", "the output image.").type_image_out ();
 
   OPTIONS
+  + FFTAxesOption
   + FFTOption
   + GradientOption
   + MedianOption
@@ -137,44 +143,69 @@ void usage() {
 }
 // clang-format on
 
+std::vector<size_t> get_axes(const Header &H, const std::vector<size_t> &default_axes) {
+  auto opt = get_options("axes");
+  std::vector<size_t> axes = default_axes;
+  if (!opt.empty()) {
+    axes = parse_ints<size_t>(opt[0][0]);
+    for (const auto axis : axes)
+      if (axis >= H.ndim())
+        throw Exception("axis provided with -axes option is out of range");
+    if (std::set<size_t>(axes.begin(), axes.end()).size() != axes.size())
+      throw Exception("axis indices must not contain duplicates");
+  }
+  return axes;
+}
+
 void run() {
 
   const size_t filter_index = argument[1];
 
   switch (filter_index) {
 
-  // FFT
+  // Phase demodulation
   case 0: {
-    // FIXME Had to use cdouble throughout; seems to fail at compile time even trying to
-    //   convert between cfloat and cdouble...
-    auto input = Image<cdouble>::open(argument[0]);
+    Header H_in = Header::open(argument[0]);
+    if (!H_in.datatype().is_complex())
+      throw Exception("demodulation filter only applicable for complex image data");
+    auto input = H_in.get_image<cdouble>();
 
-    std::vector<size_t> axes = {0, 1, 2};
-    auto opt = get_options("axes");
-    if (!opt.empty()) {
-      axes = parse_ints<size_t>(opt[0][0]);
-      for (const auto axis : axes)
-        if (axis >= input.ndim())
-          throw Exception("axis provided with -axes option is out of range");
-    }
+    const std::vector<size_t> inner_axes = get_axes(H_in, {0, 1});
+
+    Filter::Demodulate filter(input, inner_axes);
+
+    Header H_out(H_in);
+    Stride::set_from_command_line(H_out);
+    auto output = Image<cdouble>::create(argument[2], H_out);
+
+    filter(input, output);
+  } break;
+
+  // FFT
+  case 1: {
+    Header H_in = Header::open(argument[0]);
+    std::vector<size_t> axes = get_axes(H_in, {0, 1, 2});
     const int direction = get_options("inverse").empty() ? FFTW_FORWARD : FFTW_BACKWARD;
     const bool centre_FFT = !get_options("centre_zero").empty();
     const bool magnitude = !get_options("magnitude").empty();
 
-    Header header = input;
-    Stride::set_from_command_line(header);
-    header.datatype() = magnitude ? DataType::Float32 : DataType::CFloat64;
-    auto output = Image<cdouble>::create(argument[2], header);
+    Header H_out(H_in);
+    Stride::set_from_command_line(H_out);
+    H_out.datatype() = magnitude ? DataType::Float32 : DataType::CFloat64;
+    auto output = Image<cdouble>::create(argument[2], H_out);
     double scale = 1.0;
+
+    // FIXME Had to use cdouble throughout; seems to fail at compile time even trying to
+    //   convert between cfloat and cdouble...
+    auto input = H_in.get_image<cdouble>();
 
     Image<cdouble> in(input), out;
     for (size_t n = 0; n < axes.size(); ++n) {
       scale *= in.size(axes[n]);
-      if (n >= (axes.size() - 1) && !magnitude) {
+      if (n == (axes.size() - 1) && !magnitude) {
         out = output;
-      } else {
-        if (!out.valid())
-          out = Image<cdouble>::scratch(input);
+      } else if (!out.valid()) {
+        out = Image<cdouble>::scratch(H_in);
       }
 
       Math::FFT(in, out, axes[n], direction, centre_FFT);
@@ -187,15 +218,15 @@ void run() {
           [](decltype(out) &a, decltype(output) &b) { a.value() = abs(cdouble(b.value())); }, output, out);
     }
     if (!get_options("rescale").empty()) {
-      scale = std::sqrt(scale);
-      ThreadedLoop(out).run([&scale](decltype(out) &a) { a.value() /= scale; }, output);
+      scale = 1.0 / std::sqrt(scale);
+      ThreadedLoop(out).run([&scale](decltype(out) &a) { a.value() *= scale; }, output);
     }
 
     break;
   }
 
   // Gradient
-  case 1: {
+  case 2: {
     auto input = Image<float>::open(argument[0]);
     Filter::Gradient filter(input, !get_options("magnitude").empty());
 
@@ -224,7 +255,7 @@ void run() {
   }
 
   // Median
-  case 2: {
+  case 3: {
     auto input = Image<float>::open(argument[0]);
     Filter::Median filter(input);
 
@@ -241,7 +272,7 @@ void run() {
   }
 
   // Smooth
-  case 3: {
+  case 4: {
     auto input = Image<float>::open(argument[0]);
     Filter::Smooth filter(input);
 
@@ -272,7 +303,7 @@ void run() {
   }
 
   // Normalisation
-  case 4: {
+  case 5: {
     auto input = Image<float>::open(argument[0]);
     Filter::Normalise filter(input);
 
@@ -289,7 +320,7 @@ void run() {
   }
 
   // Zclean
-  case 5: {
+  case 6: {
     auto input = Image<float>::open(argument[0]);
     Filter::ZClean filter(input);
 

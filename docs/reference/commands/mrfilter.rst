@@ -22,7 +22,7 @@ Usage
 Description
 -----------
 
-The available filters are: fft, gradient, median, smooth, normalise, zclean.
+The available filters are: demodulate, fft, gradient, median, smooth, normalise, zclean.
 
 Each filter has its own unique set of optional parameters.
 
@@ -31,10 +31,13 @@ For 4D images, each 3D volume is processed independently.
 Options
 -------
 
-Options for FFT filter
-^^^^^^^^^^^^^^^^^^^^^^
+Options applicable to both demodulate and FFT filters
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 -  **-axes list** the axes along which to apply the Fourier Transform. By default, the transform is applied along the three spatial axes. Provide as a comma-separate list of axis indices.
+
+Options for FFT filter
+^^^^^^^^^^^^^^^^^^^^^^
 
 -  **-inverse** apply the inverse FFT
 
