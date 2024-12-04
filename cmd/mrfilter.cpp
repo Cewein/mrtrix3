@@ -21,6 +21,7 @@
 #include "filter/base.h"
 #include "filter/demodulate.h"
 #include "filter/gradient.h"
+#include "filter/kspace.h"
 #include "filter/median.h"
 #include "filter/normalise.h"
 #include "filter/smooth.h"
@@ -32,14 +33,19 @@
 using namespace MR;
 using namespace App;
 
-const std::vector<std::string> filters = {"demodulate", "fft", "gradient", "median", "smooth", "normalise", "zclean"};
+const std::vector<std::string> filters = {
+    "demodulate", "fft", "gradient", "kspace", "median", "smooth", "normalise", "zclean"};
 
 // clang-format off
-const OptionGroup FFTAxesOption = OptionGroup ("Options applicable to both demodulate and FFT filters")
+const OptionGroup FFTAxesOption = OptionGroup ("Options applicable to demodulate / FFT / k-space filters")
   + Option ("axes", "the axes along which to apply the Fourier Transform."
                     " By default, the transform is applied along the three spatial axes."
                     " Provide as a comma-separate list of axis indices.")
     + Argument ("list").type_sequence_int();
+
+const OptionGroup DemodulateOption = OptionGroup ("Options applicable to demodulate filter")
+  + Option ("linear", "only demodulate based on a linear phase ramp, "
+                      "rather than a filtered k-space");
 
 const OptionGroup FFTOption = OptionGroup ("Options for FFT filter")
   + Option ("inverse", "apply the inverse FFT")
@@ -61,6 +67,15 @@ const OptionGroup GradientOption = OptionGroup ("Options for gradient filter")
                          " rather than the default x,y,z components")
   + Option ("scanner", "define the gradient with respect to"
                        " the scanner coordinate frame of reference.");
+
+const OptionGroup KSpaceOption = OptionGroup ("Options for k-space filtering")
+  + Option ("window", "specify the shape of the k-space window filter; "
+                      "options are: " + join(Filter::kspace_window_choices, ",") + " "
+                      "(no default; must be specified for \"kspace\" operation)")
+    + Argument("name").type_choice(Filter::kspace_window_choices)
+  + Option ("strength", "modulate the strength of the chosen filter "
+                        "(exact interpretation & defaultmay depend on the exact filter chosen)")
+    + Argument("value").type_float(0.0, 1.0);
 
 const OptionGroup MedianOption = OptionGroup ("Options for median filter")
   + Option ("extent", "specify extent of median filtering neighbourhood in voxels."
@@ -134,6 +149,7 @@ void usage() {
   + FFTAxesOption
   + FFTOption
   + GradientOption
+  + KSpaceOption
   + MedianOption
   + NormaliseOption
   + SmoothOption
@@ -143,6 +159,7 @@ void usage() {
 }
 // clang-format on
 
+// TODO Use presence of SliceEncodingDirection to select defaults
 std::vector<size_t> get_axes(const Header &H, const std::vector<size_t> &default_axes) {
   auto opt = get_options("axes");
   std::vector<size_t> axes = default_axes;
@@ -172,7 +189,7 @@ void run() {
 
     const std::vector<size_t> inner_axes = get_axes(H_in, {0, 1});
 
-    Filter::Demodulate filter(input, inner_axes);
+    Filter::Demodulate filter(input, inner_axes, !get_options("linear").empty());
 
     Header H_out(H_in);
     Stride::set_from_command_line(H_out);
@@ -254,8 +271,42 @@ void run() {
     break;
   }
 
-  // Median
+  // k-space filtering
   case 3: {
+    auto opt_window = get_options("window");
+    if (opt_window.empty())
+      throw Exception("-window option is compulsory for k-space filtering");
+
+    Header H_in = Header::open(argument[0]);
+    const std::vector<size_t> axes = get_axes(H_in, {0, 1, 2});
+    const bool is_complex = H_in.datatype().is_complex();
+    auto input = H_in.get_image<cdouble>();
+
+    Image<double> window;
+    switch (Filter::kspace_windowfn_t(int(opt_window[0][0]))) {
+    case Filter::kspace_windowfn_t::TUKEY:
+      window = Filter::KSpace::window_tukey(H_in, axes, get_option_value("strength", Filter::default_tukey_width));
+      break;
+    default:
+      assert(false);
+    }
+    Filter::KSpace filter(H_in, window);
+    Header H_out(H_in);
+
+    if (is_complex) {
+      auto output = Image<cdouble>::create(argument[2], H_out);
+      filter(input, output);
+    } else {
+      H_out.datatype() = DataType::Float32;
+      H_out.datatype().set_byte_order_native();
+      auto output = Image<float>::create(argument[2], H_out);
+      filter(input, output);
+    }
+    break;
+  }
+
+  // Median
+  case 4: {
     auto input = Image<float>::open(argument[0]);
     Filter::Median filter(input);
 
@@ -272,7 +323,7 @@ void run() {
   }
 
   // Smooth
-  case 4: {
+  case 5: {
     auto input = Image<float>::open(argument[0]);
     Filter::Smooth filter(input);
 
@@ -303,7 +354,7 @@ void run() {
   }
 
   // Normalisation
-  case 5: {
+  case 6: {
     auto input = Image<float>::open(argument[0]);
     Filter::Normalise filter(input);
 
@@ -320,7 +371,7 @@ void run() {
   }
 
   // Zclean
-  case 6: {
+  case 7: {
     auto input = Image<float>::open(argument[0]);
     Filter::ZClean filter(input);
 
