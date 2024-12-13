@@ -147,6 +147,7 @@ void usage() {
 
   OPTIONS
   + FFTAxesOption
+  + DemodulateOption
   + FFTOption
   + GradientOption
   + KSpaceOption
