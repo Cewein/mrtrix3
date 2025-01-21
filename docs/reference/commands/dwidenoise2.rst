@@ -1,19 +1,19 @@
-.. _dwidenoise:
+.. _dwidenoise2:
 
-dwidenoise
+dwidenoise2
 ===================
 
 Synopsis
 --------
 
-dMRI noise level estimation and denoising using Marchenko-Pastur PCA
+Improved dMRI denoising using Marchenko-Pastur PCA
 
 Usage
 --------
 
 ::
 
-    dwidenoise [ options ]  dwi out
+    dwidenoise2 [ options ]  dwi out
 
 -  *dwi*: the input diffusion-weighted image.
 -  *out*: the output denoised DWI image.
@@ -21,13 +21,15 @@ Usage
 Description
 -----------
 
+This command includes many capabilities absent from the original dwidenoise command. These include: - Multiple sliding window kernel shapes, including a spherical kernel that dilates at image edges to preserve aspect ratio; - A greater number of mechanisms for noise level estimation, including taking a pre-estimated noise map as input; - Preconditioning, including (per-shell) demeaning, phase demodulation (linear or nonlinear), and variance-stabilising transform to compensate for within-patch heteroscedasticity; - Overcomplete local PCA; - Subsampling (performing fewer PCAs than there are input voxels).
+
 DWI data denoising and noise map estimation by exploiting data redundancy in the PCA domain using the prior knowledge that the eigenspectrum of random covariance matrices is described by the universal Marchenko-Pastur (MP) distribution. Fitting the MP distribution to the spectrum of patch-wise signal matrices hence provides an estimator of the noise level 'sigma'; this noise level estimate then determines the optimal cut-off for PCA denoising.
 
 Important note: image denoising must be performed as the first step of the image processing pipeline. The routine will fail if interpolation or smoothing has been applied to the data prior to denoising.
 
 Note that this function does not correct for non-Gaussian noise biases present in magnitude-reconstructed MRI images. If available, including the MRI phase data can reduce such non-Gaussian biases, and the command now supports complex input data.
 
-If the input data are of complex type, then a linear phase term will be removed from each k-space prior to PCA. In the absence of metadata indicating otherwise, it is inferred that the first two axes correspond to acquired slices, and different slices / volumes will be demodulated individually; this behaviour can be modified using the -demod_axes option.
+If the input data are of complex type, then a smooth non-linear phase will be demodulated removed from each k-space prior to PCA. In the absence of metadata indicating otherwise, it is inferred that the first two axes correspond to acquired slices, and different slices / volumes will be demodulated individually; this behaviour can be modified using the -demod_axes option. A strictly linear phase term can instead be regressed from each k-space, similarly to performed in Cordero-Grande et al. 2019, by specifying -demodulate linear.
 
 The sliding spatial window behaves differently at the edges of the image FoV depending on the shape / size selected for that window. The default behaviour is to use a spherical kernel centred at the voxel of interest, whose size is some multiple of the number of input volumes; where some such voxels lie outside of the image FoV, the radius of the kernel will be increased until the requisite number of voxels are used. For a spherical kernel of a fixed radius, no such expansion will occur, and so for voxels near the image edge a reduced number of voxels will be present in the kernel. For a cuboid kernel, the centre of the kernel will be offset from the voxel being processed such that the entire volume of the kernel resides within the image FoV.
 
@@ -39,6 +41,15 @@ By default, optimal value shrinkage based on minimisation of the Frobenius norm 
 
 -aggregation exclusive corresponds to the behaviour of the dwidenoise command in version 3.0.x, where the output intensities for a given image voxel are determined exclusively from the PCA decomposition where the sliding spatial window is centred at that voxel. In all other use cases, so-called "overcomplete local PCA" is performed, where the intensities for an output image voxel are some combination of all PCA decompositions for which that voxel is included in the local spatial kernel. There are multiple algebraic forms that modulate the weight with which each decomposition contributes with greater or lesser strength toward the output image intensities. The various options are: 'gaussian': A Gaussian distribution with FWHM equal to twice the voxel size, such that decompisitions centred more closely to the output voxel have greater influence; 'invl0': The inverse of the L0 norm (ie. rank) of each decomposition, as used in Manjon et al. 2013; 'rank': The rank of each decomposition, such that high-rank decompositions contribute more strongly to the output intensities regardless of distance between the output voxel and the centre of the decomposition kernel; 'uniform': All decompositions that include the output voxel in the sliding spatial window contribute equally.
 
+Example usages
+--------------
+
+-   *To approximately replicate the behaviour of the original dwidenoise command*::
+
+        $ dwidenoise2 DWI.mif out.mif -shape cuboid -subsample 1 -demodulate none -demean none -filter truncate -aggregator exclusive
+
+    While this is neither guaranteed to match exactly the output of the original dwidenoise command nor is it a recommended use case, it may nevertheless be informative in demonstrating those advanced features of dwidenoise2 active by default that must be explicitly disabled in order to approximate that behaviour.
+
 Options
 -------
 
@@ -47,11 +58,19 @@ Options for modifying PCA computations
 
 -  **-datatype float32/float64** Datatype for the eigenvalue decomposition (single or double precision). For complex input data, this will select complex float32 or complex float64 datatypes.
 
+Options relating to signal / noise level estimation for denoising
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 -  **-estimator algorithm** Select the noise level estimator (default = Exp2), either:  |br|
    * Exp1: the original estimator used in Veraart et al. (2016);  |br|
    * Exp2: the improved estimator introduced in Cordero-Grande et al. (2019);  |br|
    * Med: estimate based on the median eigenvalue as in Gavish and Donohue (2014);  |br|
-   * MRM2022: the alternative estimator introduced in Olesen et al. (2022).
+   * MRM2022: the alternative estimator introduced in Olesen et al. (2022).  |br|
+   Operation will be bypassed if -noise_in or -fixed_rank are specified
+
+-  **-noise_in image** import a pre-estimated noise level map for denoising rather than estimating this level from data
+
+-  **-fixed_rank value** set a fixed input signal rank rather than estimating the noise level from the data
 
 Options for controlling the sliding spatial window kernel
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -64,19 +83,23 @@ Options for controlling the sliding spatial window kernel
 
 -  **-extent window** Set the patch size of the cuboid kernel; can be either a single integer or a comma-separated triplet of integers (see Description)
 
--  **-subsample factor** reduce the number of PCA kernels relative to the number of image voxels; can provide either an integer subsampling factor, or a comma-separated list of three factors;default: 2
+-  **-subsample factor** reduce the number of PCA kernels relative to the number of image voxels; can provide either an integer subsampling factor, or a comma-separated list of three factors; default: 2
 
-Options for phase demodulation of complex data
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Options for preconditioning data prior to PCA
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
--  **-nodemod** disable phase demodulation
+-  **-demodulate mode** select form of phase demodulation; options are: none,linear,nonlinear (default: nonlinear)
 
 -  **-demod_axes axes** comma-separated list of axis indices along which FFT can be applied for phase demodulation
 
+-  **-demean mode** select method of demeaning prior to PCA; options are: none,shells,all (default: 'shells' if DWI gradient table available, 'all' otherwise)
+
+-  **-vst image** apply a within-patch variance-stabilising transformation based on a pre-estimated noise level map
+
+-  **-preconditioned image** export the preconditioned version of the input image that is the input to PCA
+
 Options that affect reconstruction of the output image series
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
--  **-mask image** Only denoise voxels within the specified binary brain mask image.
 
 -  **-filter choice** Modulate how component contributions are filtered based on the cumulative eigenvalues relative to the noise level; options are: optshrink,optthresh,truncate; default: optshrink (Optimal Shrinkage based on minimisation of the Frobenius norm)
 
@@ -144,21 +167,21 @@ Tournier, J.-D.; Smith, R. E.; Raffelt, D.; Tabbara, R.; Dhollander, T.; Pietsch
 
 
 
-**Author:** Daan Christiaens (daan.christiaens@kcl.ac.uk) and Jelle Veraart (jelle.veraart@nyumc.org) and J-Donald Tournier (jdtournier@gmail.com) and Robert E. Smith (robert.smith@florey.edu.au)
+**Author:** Robert E. Smith (robert.smith@florey.edu.au) and Daan Christiaens (daan.christiaens@kcl.ac.uk) and Jelle Veraart (jelle.veraart@nyumc.org) and J-Donald Tournier (jdtournier@gmail.com)
 
-**Copyright:** Copyright (c) 2016 New York University, University of Antwerp, and the MRtrix3 contributors 
- 
-Permission is hereby granted, free of charge, to any non-commercial entity ('Recipient') obtaining a copy of this software and associated documentation files (the 'Software'), to the Software solely for non-commercial research, including the rights to use, copy and modify the Software, subject to the following conditions: 
- 
-	 1. The above copyright notice and this permission notice shall be included by Recipient in all copies or substantial portions of the Software. 
- 
-	 2. THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIESOF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BELIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF ORIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. 
- 
-	 3. In no event shall NYU be liable for direct, indirect, special, incidental or consequential damages in connection with the Software. Recipient will defend, indemnify and hold NYU harmless from any claims or liability resulting from the use of the Software by recipient. 
- 
-	 4. Neither anything contained herein nor the delivery of the Software to recipient shall be deemed to grant the Recipient any right or licenses under any patents or patent application owned by NYU. 
- 
-	 5. The Software may only be used for non-commercial research and may not be used for clinical care. 
- 
-	 6. Any publication by Recipient of research involving the Software shall cite the references listed below.
+**Copyright:** Copyright (c) 2008-2024 the MRtrix3 contributors.
+
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+Covered Software is provided under this License on an "as is"
+basis, without warranty of any kind, either expressed, implied, or
+statutory, including, without limitation, warranties that the
+Covered Software is free of defects, merchantable, fit for a
+particular purpose or non-infringing.
+See the Mozilla Public License v. 2.0 for more details.
+
+For more details, see http://www.mrtrix.org/.
+
 

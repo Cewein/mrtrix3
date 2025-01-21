@@ -29,7 +29,7 @@ Important note: noise level estimation should only be performed as the first ste
 
 Note that on complex input data, the output will be the total noise level across real and imaginary channels, so a scale factor sqrt(2) applies.
 
-If the input data are of complex type, then a linear phase term will be removed from each k-space prior to PCA. In the absence of metadata indicating otherwise, it is inferred that the first two axes correspond to acquired slices, and different slices / volumes will be demodulated individually; this behaviour can be modified using the -demod_axes option.
+If the input data are of complex type, then a smooth non-linear phase will be demodulated removed from each k-space prior to PCA. In the absence of metadata indicating otherwise, it is inferred that the first two axes correspond to acquired slices, and different slices / volumes will be demodulated individually; this behaviour can be modified using the -demod_axes option. A strictly linear phase term can instead be regressed from each k-space, similarly to performed in Cordero-Grande et al. 2019, by specifying -demodulate linear.
 
 The sliding spatial window behaves differently at the edges of the image FoV depending on the shape / size selected for that window. The default behaviour is to use a spherical kernel centred at the voxel of interest, whose size is some multiple of the number of input volumes; where some such voxels lie outside of the image FoV, the radius of the kernel will be increased until the requisite number of voxels are used. For a spherical kernel of a fixed radius, no such expansion will occur, and so for voxels near the image edge a reduced number of voxels will be present in the kernel. For a cuboid kernel, the centre of the kernel will be offset from the voxel being processed such that the entire volume of the kernel resides within the image FoV.
 
@@ -49,7 +49,8 @@ Options for modifying PCA computations
    * Exp1: the original estimator used in Veraart et al. (2016);  |br|
    * Exp2: the improved estimator introduced in Cordero-Grande et al. (2019);  |br|
    * Med: estimate based on the median eigenvalue as in Gavish and Donohue (2014);  |br|
-   * MRM2022: the alternative estimator introduced in Olesen et al. (2022).
+   * MRM2022: the alternative estimator introduced in Olesen et al. (2022).  |br|
+   Operation will be bypassed if -noise_in or -fixed_rank are specified
 
 Options for controlling the sliding spatial window kernel
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -62,28 +63,48 @@ Options for controlling the sliding spatial window kernel
 
 -  **-extent window** Set the patch size of the cuboid kernel; can be either a single integer or a comma-separated triplet of integers (see Description)
 
--  **-subsample factor** reduce the number of PCA kernels relative to the number of image voxels; can provide either an integer subsampling factor, or a comma-separated list of three factors;default: 2
+-  **-subsample factor** reduce the number of PCA kernels relative to the number of image voxels; can provide either an integer subsampling factor, or a comma-separated list of three factors; default: 2
 
-Options for phase demodulation of complex data
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Options for preconditioning data prior to PCA
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
--  **-nodemod** disable phase demodulation
+-  **-demodulate mode** select form of phase demodulation; options are: none,linear,nonlinear (default: nonlinear)
 
 -  **-demod_axes axes** comma-separated list of axis indices along which FFT can be applied for phase demodulation
+
+-  **-demean mode** select method of demeaning prior to PCA; options are: none,shells,all (default: 'shells' if DWI gradient table available, 'all' otherwise)
+
+-  **-vst image** apply a within-patch variance-stabilising transformation based on a pre-estimated noise level map
+
+-  **-preconditioned image** export the preconditioned version of the input image that is the input to PCA
+
+DW gradient table import options
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+-  **-grad file** Provide the diffusion-weighted gradient scheme used in the acquisition in a text file. This should be supplied as a 4xN text file with each line in the format [ X Y Z b ], where [ X Y Z ] describe the direction of the applied gradient, and b gives the b-value in units of s/mm^2. If a diffusion gradient scheme is present in the input image header, the data provided with this option will be instead used.
+
+-  **-fslgrad bvecs bvals** Provide the diffusion-weighted gradient scheme used in the acquisition in FSL bvecs/bvals format files. If a diffusion gradient scheme is present in the input image header, the data provided with this option will be instead used.
+
+DW gradient table export options
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+-  **-export_grad_mrtrix path** export the diffusion-weighted gradient table to file in MRtrix format
+
+-  **-export_grad_fsl bvecs_path bvals_path** export the diffusion-weighted gradient table to files in FSL (bvecs / bvals) format
 
 Options for exporting additional data regarding PCA behaviour
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
--  **-rank image** The signal rank estimated for the denoising patch centred at each input image voxel
+-  **-rank image** The signal rank estimated for each denoising patch
 
 Options for debugging the operation of sliding window kernels
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
--  **-max_dist image** The maximum distance between a voxel and another voxel that was included in the local denoising patch
+-  **-max_dist image** The maximum distance between the centre of the patch and a voxel that was included within that patch
 
--  **-voxelcount image** The number of voxels that contributed to the PCA for processing of each voxel
+-  **-voxelcount image** The number of voxels that contributed to the PCA for processing of each patch
 
--  **-patchcount image** The number of unique patches to which an image voxel contributes
+-  **-patchcount image** The number of unique patches to which an input image voxel contributes
 
 Standard options
 ^^^^^^^^^^^^^^^^
@@ -113,7 +134,7 @@ Cordero-Grande, L.; Christiaens, D.; Hutter, J.; Price, A.N.; Hajnal, J.V. Compl
 
 * If using -estimator mrm2022: Olesen, J.L.; Ianus, A.; Ostergaard, L.; Shemesh, N.; Jespersen, S.N. Tensor denoising of multidimensional MRI data. Magnetic Resonance in Medicine, 2022, 89(3), 1160-1172
 
-* If using -estimator med: Gavish, M.; Donoho, D.L.The Optimal Hard Threshold for Singular Values is 4/sqrt(3). IEEE Transactions on Information Theory, 2014, 60(8), 5040-5053.
+* If using -estimator med: Gavish, M.; Donoho, D.L. The Optimal Hard Threshold for Singular Values is 4/sqrt(3). IEEE Transactions on Information Theory, 2014, 60(8), 5040-5053.
 
 Tournier, J.-D.; Smith, R. E.; Raffelt, D.; Tabbara, R.; Dhollander, T.; Pietsch, M.; Christiaens, D.; Jeurissen, B.; Yeh, C.-H. & Connelly, A. MRtrix3: A fast, flexible and open software framework for medical image processing and visualisation. NeuroImage, 2019, 202, 116137
 
