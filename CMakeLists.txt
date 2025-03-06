@@ -24,6 +24,7 @@ option(MRTRIX_STRIP_CONDA "Strip ananconda/mininconda from PATH to avoid conflic
 option(MRTRIX_USE_PCH "Use precompiled headers" ON)
 option(MRTRIX_PYTHON_SOFTLINK "Build directory softlink to Python source code rather than copying" ON)
 option(MRTRIX_BUILD_NON_CORE_STATIC "Build MRtrix's non-core code as a static library" OFF)
+option(MRTRIX_BUILD_CPP_COMMANDS "Build the C++ commands" ON)
 
 if(MRTRIX_BUILD_TESTS)
     if(CMAKE_VERSION VERSION_GREATER 3.17)
@@ -146,7 +147,10 @@ if(COMPILER_PATH MATCHES "fsl/bin" OR LINKER_PATH MATCHES "fsl/bin")
     )
 endif()
 
-add_subdirectory(cmd)
+if(MRTRIX_BUILD_CPP_COMMANDS)
+    add_subdirectory(cmd)
+endif()
+
 add_subdirectory(core)
 add_subdirectory(python)
 add_subdirectory(share)
