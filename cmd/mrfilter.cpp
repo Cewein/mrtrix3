@@ -190,7 +190,8 @@ void run() {
 
     const std::vector<size_t> inner_axes = get_axes(H_in, {0, 1});
 
-    Filter::Demodulate filter(input, inner_axes, !get_options("linear").empty());
+    const bool linear = !get_options("linear").empty();
+    Filter::Demodulate filter(input, inner_axes, linear);
 
     Header H_out(H_in);
     Stride::set_from_command_line(H_out);
