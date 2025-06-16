@@ -2,7 +2,28 @@ include(CheckSymbolExists)
 
 #this is needed for windows to find the library
 find_package(FFTW REQUIRED)
-find_package(ZLIB REQUIRED)
+find_package(ZLIB QUIET)
+
+if(NOT ZLIB_FOUND)
+  message(STATUS "zlib not found on system, fetching from GitHub...")
+
+  include(FetchContent)
+
+  # Fetch zlib from GitHub
+  FetchContent_Declare(
+    zlib
+    GIT_REPOSITORY https://github.com/madler/zlib.git
+    GIT_TAG        v1.3  # Use a known stable release tag
+  )
+
+  FetchContent_MakeAvailable(zlib)
+
+  # Set variables as if they came from find_package
+  set(ZLIB_LIBRARIES zlib)
+  set(ZLIB_INCLUDE_DIRS ${zlib_SOURCE_DIR})
+  add_library(ZLIB::ZLIB ALIAS zlib)
+endif()
+
 find_package(Git QUIET)
 find_package(Threads REQUIRED)
 find_package(PNG QUIET)
