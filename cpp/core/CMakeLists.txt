@@ -1,6 +1,8 @@
 include(CheckSymbolExists)
-find_package(ZLIB REQUIRED)
+
+#this is needed for windows to find the library
 find_package(FFTW REQUIRED)
+find_package(ZLIB REQUIRED)
 find_package(Git QUIET)
 find_package(Threads REQUIRED)
 find_package(PNG QUIET)

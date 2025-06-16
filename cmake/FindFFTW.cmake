@@ -18,17 +18,29 @@
 #
 
 #If environment variable FFTWDIR is specified, it has same effect as FFTW_ROOT
-if( NOT FFTW_ROOT AND ENV{FFTWDIR} )
+if( NOT FFTW_ROOT AND DEFINED ENV{FFTWDIR})
   set( FFTW_ROOT $ENV{FFTWDIR} )
 endif()
 
-# Check if we can use PkgConfig
-include(CMakeFindDependencyMacro)
-find_dependency(PkgConfig)
+if(MSVC)
+  message(STATUS "FFTW: MSVC detected, using static libraries by default")
+  message(STATUS "FFTW: if you want to know how to use FFTW with MSVC, see: https://www.fftw.org/install/windows.html")
 
-#Determine from PKG
-if( PKG_CONFIG_FOUND AND NOT FFTW_ROOT )
-  pkg_check_modules( PKG_FFTW QUIET "fftw3" )
+  if(NOT FFTW_ROOT AND NOT DEFINED ENV{FFTWDIR})
+    message(FATAL_ERROR "FFTW: Set FFTW_ROOT or FFTWDIR to use a specific FFTW installation")
+  else()
+    message(STATUS "FFTW: Using FFTW_ROOT=${FFTW_ROOT}")
+  endif()
+
+else()
+  # Check if we can use PkgConfig
+  include(CMakeFindDependencyMacro)
+  find_dependency(PkgConfig)
+
+  #Determine from PKG
+  if( PKG_CONFIG_FOUND AND NOT FFTW_ROOT )
+    pkg_check_modules( PKG_FFTW QUIET "fftw3" )
+  endif()
 endif()
 
 #Check whether to search static or dynamic libs
@@ -43,24 +55,25 @@ else()
     endif()
 endif()
 
+message(STATUS "FFTW: Searching for FFTW libraries...")
+
 if( FFTW_ROOT )
 
-  #find libs
+  
+  # Find the FFTW library
   find_library(
     FFTW_LIB
-    NAMES "fftw3"
+    NAMES fftw3 libfftw3-3 fftw3-3
     PATHS ${FFTW_ROOT}
-    PATH_SUFFIXES "lib" "lib64"
-    NO_DEFAULT_PATH
+    PATH_SUFFIXES lib lib64 .
   )
 
-  #find includes
+  # Find the FFTW header
   find_path(
     FFTW_INCLUDES
-    NAMES "fftw3.h"
+    NAMES fftw3.h
     PATHS ${FFTW_ROOT}
-    PATH_SUFFIXES "include"
-    NO_DEFAULT_PATH
+    PATH_SUFFIXES include .
   )
 
 else()
